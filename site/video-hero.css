@@ -32,14 +32,14 @@
     linear-gradient(0deg,#10181080,transparent 15%);
 }
 .video-hero-layout { height: 100%; display: grid; grid-template-rows: 1fr auto auto; padding: 24px 0; }
-.video-hero-copy { align-self: center; max-width: min(61%, 720px); }
+.video-hero-copy { align-self: center; max-width: min(63%, 760px); }
 .hero-preload .video-hero-copy { visibility: hidden; }
 .video-hero.is-active .video-hero-copy {
   opacity: var(--hero-title-opacity, 0);
   mask-image: var(--hero-water-mask, none);
 }
 .video-hero-brand { color: #e0ecc6; font: 750 11px/1.4 ui-monospace,monospace; letter-spacing: .15em; margin-bottom: 20px; }
-.video-hero h1 { font-size: clamp(48px, 7.6vw, 112px); line-height: .91; letter-spacing: -.079em; margin: 0 0 19px; }
+.video-hero h1 { font-size: clamp(46px, 5.35vw, 86px); line-height: .91; letter-spacing: -.079em; margin: 0 0 19px; }
 .video-hero h1 em { color: var(--hero-accent); font-style: normal; }
 .video-hero-copy p:not(.video-hero-brand) { font-size: 16px; max-width: 340px; color: #f0f3e8; margin-bottom: 19px; }
 .video-hero-cta { display: inline-flex; justify-content: space-between; gap: 14px; padding: 11px 16px; border-radius: 6px; color: #253019; background: var(--hero-accent); font-weight: 750; font-size: 14px; }

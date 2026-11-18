@@ -8,7 +8,7 @@
   const motion = matchMedia('(prefers-reduced-motion: reduce)');
 
   const clips = {
-    mobile: { path: 'media/mobile.mp4', impact: 6.27, reveal: 6.33, clear: 7.39, end: 7.44 },
+    mobile: { path: 'media/mobile.mp4', impact: 6.27, reveal: 6.33, clear: 7.19, end: 7.44 },
     desktop: { path: 'media/desktop.mp4', impact: 5.28, reveal: 5.42, clear: 6.75, end: 8.08 },
   };
   const landingPoints = [
@@ -61,10 +61,11 @@
     if (!isActive) return;
     const distance = Math.max(1, hero.offsetHeight - stage.offsetHeight);
     const progress = clamp(-hero.getBoundingClientRect().top / distance);
-    const attack = .68;
-    const seconds = progress <= attack
-      ? clip.impact * progress / attack
-      : mix(clip.impact, clip.end, (progress - attack) / (1 - attack));
+    const playhead = clamp(progress / .89);
+    const attack = .74;
+    const seconds = playhead <= attack
+      ? clip.impact * playhead / attack
+      : mix(clip.impact, clip.end, (playhead - attack) / (1 - attack));
     nextTime = Math.min(Math.round(seconds * 24) / 24, clip.end);
     hero.style.setProperty('--hero-progress', progress);
     hero.classList.toggle('is-beyond', progress > .70);
