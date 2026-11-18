@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow"><meta name="description" content="Демонстрационный прототип сайта компании Технополив.">
+<title>Технополив — системы орошения</title>
+<script>if (matchMedia("(prefers-reduced-motion: no-preference)").matches) document.documentElement.classList.add("hero-preload");</script><link rel="stylesheet" href="style.css"><link rel="stylesheet" href="video-hero.css">
+</head>
+<body>
+<main>
+<section class="video-hero" aria-labelledby="hero-title">
+  <div class="video-hero-stage">
+    <div class="video-hero-media" aria-hidden="true">
+      <picture>
+        <source media="(max-width: 900px) and (orientation: portrait)" srcset="media/mobile.webp">
+        <img src="media/desktop.webp" alt="" fetchpriority="high">
+      </picture>
+      <video muted playsinline preload="auto" disablepictureinpicture></video>
+    </div>
+    <div class="wrap video-hero-layout">
+      <div class="video-hero-copy">
+        <p class="video-hero-brand">ТЕХНОПОЛИВ · СИСТЕМЫ ОРОШЕНИЯ</p>
+        <h1 id="hero-title">Полив, который<br>включается <em>сам.</em></h1>
+        <p>Проектируем и комплектуем системы автоматического полива под ваш участок.</p>
+        <a class="video-hero-cta" href="#quote">Рассчитать систему <span aria-hidden="true">↗</span></a>
+      </div>
+      <a class="video-hero-scroll" href="#irrigation-start" aria-label="Запустить полив" hidden>↓</a>
+      <div class="video-hero-progress" aria-hidden="true"><i></i></div>
+    </div>
+  </div>
+  <span id="irrigation-start" class="video-hero-waypoint" aria-hidden="true"></span>
+</section>
+<div class="top"><div class="wrap"><span>Краснодар · Поставки по России</span><a href="https://технополив.рф/katalog">Каталог оборудования ↗</a></div></div>
+<header><div class="wrap nav">
+<a class="brand" href="#" aria-label="Технополив, главная"><span class="mark" aria-hidden="true">◒</span>Техно<span>полив</span></a>
+<nav aria-label="Основная навигация"><a href="#solutions">Решения</a><a href="#catalog">Каталог</a><a href="#process">Как работаем</a></nav>
+<a class="phone" href="tel:+79282024242">+7 928 202-42-42</a>
+</div></header>
+<div class="proof"><div class="wrap proof-grid"><div><strong>С 2009 года</strong><span>Работаем с системами полива</span></div><div><strong>Проектный отдел</strong><span>Подбор и комплектация</span></div><div><strong>Склад в Краснодаре</strong><span>Оборудование и комплектующие</span></div></div></div>
+<section id="solutions" class="wrap section">
+<p class="eyebrow">РЕШЕНИЯ</p><h2>Что нужно поливать?</h2>
+<div class="solutions">
+<a href="#quote" data-type="Поле и фермерское хозяйство"><h3>Поля и хозяйства</h3><p>Капельные линии, фильтрация и внесение удобрений для открытого грунта.</p><span class="arrow" aria-hidden="true">↗</span></a>
+<a href="#quote" data-type="Плодовый или ягодный сад"><h3>Сады и ягодники</h3><p>Подбор капельниц и линий под культуры, схему посадки и источник воды.</p><span class="arrow" aria-hidden="true">↗</span></a>
+<a href="#quote" data-type="Теплица"><h3>Теплицы</h3><p>Капельный полив и фертигация для защищённого грунта.</p><span class="arrow" aria-hidden="true">↗</span></a>
+<a href="#quote" data-type="Частный участок"><h3>Частные участки</h3><p>Комплекты и автоматика для огорода, сада и приусадебного участка.</p><span class="arrow" aria-hidden="true">↗</span></a>
+</div></section>
+<section class="catalog" id="catalog"><div class="wrap section">
+<p class="eyebrow">ОБОРУДОВАНИЕ</p><div class="heading"><h2>Каталог оборудования</h2><a href="https://технополив.рф/katalog" target="_blank" rel="noopener">Весь каталог ↗</a></div>
+<div class="filters" aria-label="Фильтр категорий"><button data-filter="all" aria-pressed="true">Все категории</button><button data-filter="drip" aria-pressed="false">Капельный полив</button><button data-filter="water" aria-pressed="false">Фильтрация</button><button data-filter="fert" aria-pressed="false">Фертигация</button></div>
+<div class="products">
+<article data-category="drip"><img src="bypass.jpg" alt="Байпас"><div><h3>Байпас соединения ½″</h3><p>Комплектующие для системы орошения</p><a href="https://технополив.рф/magazin/product/bajpas-soedineniya-1-2" target="_blank" rel="noopener">Карточка товара ↗</a></div></article>
+<article data-category="water"><img src="filter.jpg" alt="Фильтры"><div><h3>Фильтры очистки воды</h3><p>Подбор по источнику и расходу воды</p><a href="#quote" data-request="Подбор оборудования" data-detail="Интересуют фильтры очистки воды">Подобрать фильтр ↗</a></div></article>
+<article data-category="fert"><img src="pump.png" alt="Насос COMET"><div><h3>Насос COMET MC 25</h3><p>Оборудование для фертигации</p><a href="#quote" data-request="Подбор оборудования" data-detail="Интересует насос COMET MC 25">Уточнить наличие ↗</a></div></article>
+</div></div></section>
+<section id="process" class="wrap section"><p class="eyebrow">СОПРОВОЖДЕНИЕ ПРОЕКТА</p><h2>От исходных данных до запуска</h2>
+<ol class="steps"><li><h3>Обсуждаем задачу</h3><p>Уточняем площадь, культуру, источник воды и сроки.</p></li><li><h3>Проектируем систему</h3><p>Подбираем решение и составляем спецификацию.</p></li><li><h3>Комплектуем и поставляем</h3><p>Согласуем оборудование и условия доставки.</p></li><li><h3>Помогаем запустить</h3><p>Обсуждаем шеф-монтаж и техническое сопровождение.</p></li></ol>
+</section>
+<section id="quote" class="quote"><div class="wrap section quote-grid"><div>
+<p class="eyebrow">ПОДБОР И РАСЧЁТ</p><h2>Обсудим ваш проект</h2><p>Расскажите, что нужно поливать. Если площадь или источник воды пока неизвестны, оставьте комментарий.</p></div>
+<form id="quote-form">
+<label>Что вам нужно<select name="request"><option>Расчёт системы</option><option>Подбор оборудования</option></select></label>
+<label>Тип объекта<select name="type" required><option value="">Выберите вариант</option><option>Поле и фермерское хозяйство</option><option>Плодовый или ягодный сад</option><option>Теплица</option><option>Частный участок</option><option>Другое</option></select></label>
+<label>Площадь, регион или детали <textarea name="detail" placeholder="Например, теплица 600 м², Краснодарский край" rows="3"></textarea></label>
+<label>Телефон для связи <input id="demo-phone" type="tel" autocomplete="off" placeholder="+7 900 000-00-00" required maxlength="20"></label>
+<p class="hint">Для демонстрации используйте тестовый номер. Данные остаются на странице.</p>
+<button class="button lime" disabled>Проверить заявку <span aria-hidden="true">↗</span></button><p class="status" role="status" hidden></p>
+</form></div></section>
+</main>
+<footer><div class="wrap foot"><div><a class="brand" href="#"><span class="mark" aria-hidden="true">◒</span>Технополив</a><p>Краснодар, пос. Индустриальный,<br>ул. Евдокимовская, 123</p></div><div><a href="tel:+79282024242">+7 928 202-42-42</a><br><a href="mailto:agrokey@mail.ru">agrokey@mail.ru</a></div><a href="https://технополив.рф/" rel="noopener" target="_blank">Действующий сайт ↗</a></div></footer>
+<script src="script.js"></script>
+<script defer src="video-hero.js"></script>
+</body></html>
