@@ -59,12 +59,12 @@
 .video-hero.is-active.is-beyond .video-hero-scroll:focus-visible { opacity: 1; pointer-events: auto; }
 @media (max-width: 900px) and (orientation: portrait) {
   .video-hero.is-active { height: 228svh; }
-  .video-hero-layout { padding-block: 26px 18px; }
+  .video-hero-layout { padding-block: clamp(64px, 16svh, 148px) 18px; }
   .video-hero-media img,.video-hero-media video { object-position: 52% center; }
-  .video-hero-media::after { background: linear-gradient(180deg,#0d180de8, #0d180d82 25%, transparent 53%, transparent 84%, #0d180d85); }
+  .video-hero-media::after { background: linear-gradient(180deg,#0d180de8, #0d180d9c 32%, transparent 57%, transparent 84%, #0d180d85); }
   .video-hero-copy { align-self: start; max-width: min(100%, 550px); }
   .video-hero-brand { font-size: 9px; margin-bottom: 11px; }
-  .video-hero h1 { font-size: clamp(46px, 10.9vw, 78px); margin-bottom: 12px; }
+  .video-hero h1 { font-size: clamp(35px, 11.1vw, 74px); margin-bottom: 12px; }
   .video-hero h1 br { display: none; }
   .video-hero-copy p:not(.video-hero-brand) { font-size: 13px; max-width: 290px; margin-bottom: 13px; }
   .video-hero-cta { font-size: 12px; padding: 9px 12px; }
