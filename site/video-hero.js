@@ -9,14 +9,19 @@
   const motion = matchMedia('(prefers-reduced-motion: reduce)');
 
   const clips = {
-    mobile: { name: 'mobile', width: 288, height: 512, lightWidth: 90, lightHeight: 160,
+    mobile: { name: 'mobile', width: 432, height: 768, lightWidth: 216, lightHeight: 384,
       impact: 6.27, reveal: 6.33, clear: 7.06 },
-    desktop: { name: 'desktop', width: 768, height: 432, lightWidth: 160, lightHeight: 90,
+    desktop: { name: 'desktop', width: 1152, height: 648, lightWidth: 480, lightHeight: 270,
       impact: 5.28, reveal: 5.42, clear: 6.75 },
   };
   const rate = 60;
   const frameCount = 718;
   const sheetSize = 12;
+  const avc = { codec: 'avc1.42c02a', optimizeForLatency: true };
+  const compactSupport = typeof window.VideoDecoder?.isConfigSupported === 'function'
+    ? VideoDecoder.isConfigSupported(avc).then(result => result.supported, () => false)
+    : Promise.resolve(false);
+  let compactFailed = false;
   const landingPoints = [
     [12, 16, .01], [43, 7, .05], [71, 14, .14], [95, 9, .12],
     [26, 37, .14], [54, 38, .19], [83, 40, .22], [8, 60, .22],
@@ -34,7 +39,6 @@
   let drawn = -1;
   let drawnTrack;
   let motionTrack;
-  let lockLight = false;
   let lastStep;
   let nextAreaVisible = true;
   const lightCache = new Map();
@@ -78,6 +82,83 @@
     }
   }
 
+  function accessUnits(bytes) {
+    const starts = [];
+    for (let offset = 0; offset + 4 < bytes.length; offset++) {
+      if (bytes[offset] !== 0 || bytes[offset + 1] !== 0) continue;
+      const prefix = bytes[offset + 2] === 1 ? 3 : bytes[offset + 2] === 0 && bytes[offset + 3] === 1 ? 4 : 0;
+      if (!prefix) continue;
+      if ((bytes[offset + prefix] & 31) === 9) starts.push(offset);
+      offset += prefix - 1;
+    }
+    if (starts.length) starts[0] = 0;
+    return starts.map((start, index) => bytes.subarray(start, starts[index + 1] ?? bytes.length));
+  }
+
+  async function decodeAvc(blob, reference, track, index) {
+    const packets = accessUnits(new Uint8Array(await blob.arrayBuffer()));
+    const expected = Math.min(sheetSize, frameCount - index * sheetSize);
+    if (packets.length !== expected) throw new Error('Неполный блок кадров');
+
+    const width = track.name === 'light' ? reference.lightWidth : reference.width;
+    const height = track.name === 'light' ? reference.lightHeight : reference.height;
+    const sheet = document.createElement('canvas');
+    sheet.width = width * 4;
+    sheet.height = height * 3;
+    const paint = sheet.getContext('2d', { alpha: false });
+    let delivered = 0;
+    let problem;
+    const decoder = new VideoDecoder({
+      error: error => { problem = error; },
+      output: frame => {
+        try {
+          const offset = Math.round(frame.timestamp / 16667);
+          paint.drawImage(frame, offset % 4 * width, Math.floor(offset / 4) * height, width, height);
+          delivered++;
+        } finally { frame.close(); }
+      },
+    });
+    try {
+      decoder.configure(avc);
+      for (const [offset, data] of packets.entries()) {
+        decoder.decode(new EncodedVideoChunk({ type: offset === 0 ? 'key' : 'delta', timestamp: offset * 16667, data }));
+      }
+      await decoder.flush();
+      if (problem || delivered !== expected) throw problem ?? new Error('Кадры декодированы не полностью');
+      return 'createImageBitmap' in window ? await createImageBitmap(sheet) : sheet;
+    } finally {
+      if (decoder.state !== 'closed') decoder.close();
+    }
+  }
+
+  async function fetchSheet(reference, track, index, urgent, signal) {
+    const file = String(index).padStart(2, '0');
+    const url = `media/sequence-hd/${reference.name}/${track.name}/${file}`;
+    const options = { signal, priority: urgent ? 'high' : 'low' };
+    const load = async extension => {
+      const response = await fetch(`${url}.${extension}`, options);
+      if (!response.ok) throw new Error('Кадры полива недоступны');
+      return response.blob();
+    };
+    const cached = track.name === 'light' ? lightCache.get(index) : undefined;
+    if (cached) {
+      return { ...cached, image: cached.compact
+        ? await decodeAvc(cached.blob, reference, track, index)
+        : await decode(cached.blob) };
+    }
+    if (!compactFailed && await compactSupport && !signal.aborted) {
+      try {
+        const blob = await load('h264');
+        return { blob, compact: true, image: await decodeAvc(blob, reference, track, index) };
+      } catch (error) {
+        if (signal.aborted) throw error;
+        compactFailed = true;
+      }
+    }
+    const blob = await load('webp');
+    return { blob, compact: false, image: await decode(blob) };
+  }
+
   function discard(track, index) {
     track.images.get(index)?.close?.();
     track.images.delete(index);
@@ -101,28 +182,17 @@
   function requestSheet(track, index, urgent) {
     if (!clip || !nextAreaVisible || index < 0 || index * sheetSize >= frameCount ||
         track.loading.has(index) || track.images.has(index) || track.failed.has(index)) return;
-    if (track.loading.size >= (track.name === 'light' ? 3 : 2)) return;
+    if (track.loading.size >= (track.name === 'light' ? 3 : 1)) return;
 
     const reference = clip;
     const controller = new AbortController();
     track.loading.set(index, controller);
-    const file = String(index).padStart(2, '0');
-    const cached = track.name === 'light' ? lightCache.get(index) : undefined;
-    const bytes = cached ? Promise.resolve(cached) : fetch(`media/sequence60/${reference.name}/${track.name}/${file}.webp`, {
-      signal: controller.signal,
-      priority: urgent ? 'high' : 'low',
-    }).then(response => {
-      if (!response.ok) throw new Error('Кадры полива недоступны');
-      return response.blob();
-    });
-    bytes.then(blob => {
-      if (track.name === 'light' && reference === clip && !controller.signal.aborted) lightCache.set(index, blob);
-      return decode(blob);
-    }).then(image => {
+    fetchSheet(reference, track, index, urgent, controller.signal).then(({ blob, compact, image }) => {
       if (controller.signal.aborted || reference !== clip) {
         image.close?.();
         return;
       }
+      if (track.name === 'light') lightCache.set(index, { blob, compact });
       track.images.set(index, image);
     }).catch(() => {
       if (!controller.signal.aborted && reference === clip) track.failed.add(index);
@@ -134,9 +204,8 @@
 
   function connectionIsLight() {
     const connection = navigator.connection;
-    return Boolean(connection?.saveData || /2g|3g/.test(connection?.effectiveType ?? '') ||
-      (connection?.downlink > 0 && connection.downlink <= 2.5) || connection?.rtt >= 145 ||
-      (navigator.deviceMemory && navigator.deviceMemory <= 2));
+    return Boolean(connection?.saveData || (connection?.downlink > 0 && connection.downlink <= 2.5) ||
+      (clip.name === 'mobile' && navigator.deviceMemory && navigator.deviceMemory <= 2));
   }
 
   function warm(frame, direction, moving) {
@@ -146,7 +215,7 @@
     for (const track of [light, full]) {
       for (const key of new Set([...track.images.keys(), ...track.loading.keys()])) {
         const behind = (key - index) * direction;
-        if (behind < -1 || behind > (track.name === 'light' ? 3 : 2)) discard(track, key);
+        if (behind < -1 || behind > (track.name === 'light' ? 3 : 1)) discard(track, key);
       }
     }
     requestSheet(light, index, true);
@@ -198,15 +267,9 @@
     const full = tracks.full.images.has(index) ? tracks.full : undefined;
     const light = tracks.light.images.has(index) ? tracks.light : undefined;
     if (!moving) return full ?? light;
-    if (!motionTrack) motionTrack = preferredLight ? light ?? full : full ?? light;
-    if (motionTrack === tracks.full && !full && light) {
-      motionTrack = light;
-      lockLight = true;
-    } else if (motionTrack === tracks.light && !preferredLight && !lockLight &&
-               full && tracks.full.images.has(index + direction)) {
-      motionTrack = full;
-    }
-    return motionTrack === tracks.light ? light ?? full : full ?? light;
+    const fullBuffered = full && (motionTrack === tracks.full || tracks.full.images.has(index + direction));
+    motionTrack = fullBuffered ? full : light ?? full;
+    return motionTrack;
   }
 
   function bufferedFrames(frame, direction) {
@@ -230,7 +293,7 @@
     const difference = target - current;
     const direction = difference < 0 ? -1 : 1;
     const moving = difference !== 0;
-    if (!moving) { motionTrack = undefined; lockLight = false; }
+    if (!moving) motionTrack = undefined;
 
     const interval = 1000 / rate;
     if (moving && !seekingEntry && lastStep !== undefined && now - lastStep + .65 < interval) {
@@ -327,7 +390,6 @@
     current = target = 0;
     drawn = -1;
     drawnTrack = motionTrack = lastStep = undefined;
-    lockLight = false;
     preferredLight = connectionIsLight();
     seekingEntry = nextAreaVisible = true;
     canvas.width = selected.width;
@@ -342,9 +404,9 @@
 
   function prime() {
     if (!clip || target > 0) return;
-    requestSheet(tracks.light, 0, true);
-    requestSheet(tracks.light, 1, false);
     if (!preferredLight) requestSheet(tracks.full, 0, true);
+    requestSheet(tracks.light, 0, preferredLight);
+    requestSheet(tracks.light, 1, false);
   }
 
   hero.addEventListener('touchstart', prime, { passive: true, once: true });
