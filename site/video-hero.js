@@ -9,11 +9,14 @@
   const motion = matchMedia('(prefers-reduced-motion: reduce)');
 
   const clips = {
-    mobile: { name: 'mobile', width: 288, height: 512, frames: 90, previewWidth: 144, previewHeight: 256, impact: 6.27, reveal: 6.33, clear: 7.06, end: 7.42 },
-    desktop: { name: 'desktop', width: 768, height: 432, frames: 98, previewWidth: 256, previewHeight: 144, impact: 5.28, reveal: 5.42, clear: 6.75, end: 8.08 },
+    mobile: { name: 'mobile', width: 288, height: 512, lightWidth: 108, lightHeight: 192,
+      impact: 6.27, reveal: 6.33, clear: 7.06 },
+    desktop: { name: 'desktop', width: 768, height: 432, lightWidth: 192, lightHeight: 108,
+      impact: 5.28, reveal: 5.42, clear: 6.75 },
   };
-  const rate = 12;
-  const sheetSize = 8;
+  const rate = 24;
+  const frameCount = 287;
+  const sheetSize = 12;
   const landingPoints = [
     [12, 16, .01], [43, 7, .05], [71, 14, .14], [95, 9, .12],
     [26, 37, .14], [54, 38, .19], [83, 40, .22], [8, 60, .22],
@@ -21,19 +24,22 @@
   ];
   const clamp = value => Math.max(0, Math.min(1, value));
   const mix = (from, to, amount) => from + (to - from) * amount;
-  const sheets = new Map();
-  const requests = new Map();
+  const tracks = Object.fromEntries(['light', 'full'].map(name => [name,
+    { name, images: new Map(), loading: new Map(), failed: new Set() }]));
   let clip;
-  let pending;
-  let wanted = 0;
-  let drawn = 0;
-  let drawnPreview = false;
-  let preview;
-  let previewRequest;
-  const failed = new Set();
-  let previous = 0;
-  let direction = 1;
-  let inView = true;
+  let tickId;
+  let scrollId;
+  let current = 0;
+  let target = 0;
+  let drawn = -1;
+  let drawnTrack;
+  let motionTrack;
+  let lockLight = false;
+  let lastStep;
+  let nextAreaVisible = true;
+  const lightCache = new Map();
+  let seekingEntry = false;
+  let preferredLight = false;
 
   function revealTitle(time) {
     const progress = clamp((time - clip.reveal) / (clip.clear - clip.reveal));
@@ -71,136 +77,191 @@
     }
   }
 
-  function forget(index) {
-    sheets.get(index)?.close?.();
-    sheets.delete(index);
-    requests.get(index)?.abort();
-    requests.delete(index);
+  function discard(track, index) {
+    track.images.get(index)?.close?.();
+    track.images.delete(index);
+    track.loading.get(index)?.abort();
+    track.loading.delete(index);
   }
 
-  function loadSheet(index, highPriority = false) {
-    if (index < 0 || index * sheetSize >= clip.frames || sheets.has(index) || requests.has(index) || failed.has(index)) return;
+  function clearTracks() {
+    for (const track of Object.values(tracks)) {
+      for (const index of new Set([...track.images.keys(), ...track.loading.keys()])) discard(track, index);
+      track.failed.clear();
+    }
+    lightCache.clear();
+  }
+
+  function sheetIndex(frame) {
+    return Math.floor(frame / sheetSize);
+  }
+
+  function requestSheet(track, index, urgent) {
+    if (!clip || !nextAreaVisible || index < 0 || index * sheetSize >= frameCount ||
+        track.loading.has(index) || track.images.has(index) || track.failed.has(index)) return;
+    if (track.loading.size >= (track.name === 'light' ? 3 : 2)) return;
+
     const reference = clip;
     const controller = new AbortController();
-    requests.set(index, controller);
+    track.loading.set(index, controller);
     const file = String(index).padStart(2, '0');
-    fetch(`media/frames/${reference.name}/${file}.webp`, {
+    const cached = track.name === 'light' ? lightCache.get(index) : undefined;
+    const bytes = cached ? Promise.resolve(cached) : fetch(`media/sequence/${reference.name}/${track.name}/${file}.webp`, {
       signal: controller.signal,
-      priority: highPriority ? 'high' : 'low',
+      priority: urgent ? 'high' : 'low',
     }).then(response => {
-      if (!response.ok) throw new Error('Кадр полива недоступен');
+      if (!response.ok) throw new Error('Кадры полива недоступны');
       return response.blob();
-    }).then(decode).then(image => {
+    });
+    bytes.then(blob => {
+      if (track.name === 'light' && reference === clip && !controller.signal.aborted) lightCache.set(index, blob);
+      return decode(blob);
+    }).then(image => {
       if (controller.signal.aborted || reference !== clip) {
         image.close?.();
         return;
       }
-      sheets.set(index, image);
-      schedule();
+      track.images.set(index, image);
     }).catch(() => {
-      if (!controller.signal.aborted && reference === clip) {
-        failed.add(index);
-        if (!sheets.size && !preview && !previewRequest) showStatic();
-      }
+      if (!controller.signal.aborted && reference === clip) track.failed.add(index);
     }).finally(() => {
-      if (requests.get(index) === controller) requests.delete(index);
+      if (track.loading.get(index) === controller) track.loading.delete(index);
+      if (reference === clip && !controller.signal.aborted) scheduleTick();
     });
   }
 
-  function loadPreview() {
-    if (!clip || preview || previewRequest) return;
-    const reference = clip;
-    const controller = new AbortController();
-    previewRequest = controller;
-    fetch(`media/frames/${reference.name}/preview.webp`, { signal: controller.signal, priority: 'high' })
-      .then(response => {
-        if (!response.ok) throw new Error('Предпросмотр полива недоступен');
-        return response.blob();
-      })
-      .then(decode)
-      .then(image => {
-        if (clip !== reference || controller.signal.aborted) { image.close?.(); return; }
-        preview = image;
-        schedule();
-      })
-      .catch(() => {
-        if (clip === reference && !sheets.size && failed.size) showStatic();
-      })
-      .finally(() => { if (previewRequest === controller) previewRequest = undefined; });
+  function connectionIsLight() {
+    const connection = navigator.connection;
+    return Boolean(connection?.saveData || /2g|3g/.test(connection?.effectiveType ?? '') ||
+      (connection?.downlink > 0 && connection.downlink <= 2.5) || connection?.rtt >= 145 ||
+      (navigator.deviceMemory && navigator.deviceMemory <= 2));
   }
 
-  function clearMedia() {
-    for (const index of new Set([...sheets.keys(), ...requests.keys()])) forget(index);
-    previewRequest?.abort();
-    previewRequest = undefined;
-    preview?.close?.();
-    preview = undefined;
-    failed.clear();
+  function warm(frame, direction, moving) {
+    const index = sheetIndex(frame);
+    const light = tracks.light;
+    const full = tracks.full;
+    for (const track of [light, full]) {
+      for (const key of new Set([...track.images.keys(), ...track.loading.keys()])) {
+        const behind = (key - index) * direction;
+        if (behind < -1 || behind > (track.name === 'light' ? 3 : 2)) discard(track, key);
+      }
+    }
+    requestSheet(light, index, true);
+    if (moving) {
+      requestSheet(light, index + direction, true);
+      requestSheet(light, index + 2 * direction, false);
+    }
+    if (!navigator.connection?.saveData) {
+      if (!moving || !preferredLight) requestSheet(full, index, !moving);
+      if (moving && !preferredLight) requestSheet(full, index + direction, false);
+    }
   }
 
-  function showFrame(index) {
-    const image = sheets.get(Math.floor(index / sheetSize));
-    const usePreview = index > 0 && !image;
-    const actual = usePreview ? Math.floor(index / 4) * 4 : index;
-    if (drawn === actual && drawnPreview === usePreview) return;
-    if (index === 0 || actual === 0) {
+  function drawFrame(frame, track) {
+    if (drawn === frame && drawnTrack === track) return;
+    if (frame === 0) {
       hero.classList.remove('has-frame');
     } else {
-      const source = image ?? preview;
-      if (!source) return;
-      const offset = usePreview ? actual / 4 : index % sheetSize;
-      const columns = usePreview ? 6 : 4;
-      const width = usePreview ? clip.previewWidth : clip.width;
-      const height = usePreview ? clip.previewHeight : clip.height;
-      context.drawImage(source, offset % columns * width, Math.floor(offset / columns) * height,
+      const image = track?.images.get(sheetIndex(frame));
+      if (!image) return;
+      const offset = frame % sheetSize;
+      const width = track.name === 'light' ? clip.lightWidth : clip.width;
+      const height = track.name === 'light' ? clip.lightHeight : clip.height;
+      context.drawImage(image, offset % 4 * width, Math.floor(offset / 4) * height,
         width, height, 0, 0, clip.width, clip.height);
       hero.classList.add('has-frame');
     }
-    drawn = actual;
-    drawnPreview = usePreview;
-    revealTitle(actual / rate);
+    drawn = frame;
+    drawnTrack = track;
+    hero.style.setProperty('--hero-progress', frame / (frameCount - 1));
+    hero.classList.toggle('is-beyond', frame / rate >= clip.impact);
+    revealTitle(frame / rate);
+  }
+
+  function frameTrack(frame, moving, direction) {
+    const index = sheetIndex(frame);
+    const full = tracks.full.images.has(index) ? tracks.full : undefined;
+    const light = tracks.light.images.has(index) ? tracks.light : undefined;
+    if (!moving) return full ?? light;
+    if (!motionTrack) motionTrack = preferredLight ? light ?? full : full ?? light;
+    if (motionTrack === tracks.full && !full && light) {
+      motionTrack = light;
+      lockLight = true;
+    } else if (motionTrack === tracks.light && !preferredLight && !lockLight &&
+               full && tracks.full.images.has(index + direction)) {
+      motionTrack = full;
+    }
+    return motionTrack === tracks.light ? light ?? full : full ?? light;
+  }
+
+  function tick(now) {
+    tickId = undefined;
+    if (!clip || !nextAreaVisible) return;
+    const direction = target < current ? -1 : 1;
+    const moving = target !== current;
+    if (!moving) { motionTrack = undefined; lockLight = false; }
+    const next = seekingEntry ? target : moving ? current + direction : current;
+    if (next > 0) warm(next, direction, moving && !seekingEntry);
+    const track = next === 0 ? undefined : frameTrack(next, moving && !seekingEntry, direction);
+    if (next > 0 && !track) {
+      lastStep = undefined;
+      const index = sheetIndex(next);
+      if (tracks.light.failed.has(index) &&
+          (navigator.connection?.saveData || tracks.full.failed.has(index))) showStatic();
+      return;
+    }
+    const interval = 1000 / Math.min(60, 24 + Math.abs(target - current) * .52);
+    if (moving && !seekingEntry && lastStep !== undefined && now - lastStep + 1.5 < interval) {
+      scheduleTick();
+      return;
+    }
+    const previousStep = lastStep;
+    current = next;
+    seekingEntry = false;
+    drawFrame(current, track);
+    lastStep = moving ? Math.max(now - interval, (previousStep ?? now - interval) + interval) : undefined;
+    if (target !== current) scheduleTick();
+    else if (current > 0) warm(current, direction, false);
+  }
+
+  function scheduleTick() {
+    if (clip && nextAreaVisible && tickId === undefined) tickId = requestAnimationFrame(tick);
   }
 
   function updateScroll() {
-    pending = undefined;
+    scrollId = undefined;
     if (!clip) return;
     const bounds = hero.getBoundingClientRect();
-    if (!inView && bounds.bottom <= 0) return;
+    const visible = bounds.bottom > 0 && bounds.top < window.innerHeight;
+    if (visible && !nextAreaVisible) seekingEntry = true;
+    nextAreaVisible = visible;
+    if (!visible) {
+      lastStep = undefined;
+      for (const track of Object.values(tracks)) {
+        for (const index of track.loading.keys()) discard(track, index);
+      }
+      return;
+    }
+
     const distance = Math.max(1, hero.offsetHeight - stage.offsetHeight);
     const progress = clamp(-bounds.top / distance);
-    const playhead = clamp(progress / .89);
-    const attack = .74;
-    const seconds = playhead <= attack
-      ? clip.impact * playhead / attack
-      : mix(clip.impact, clip.end, (playhead - attack) / (1 - attack));
-    wanted = Math.min(Math.round(seconds * rate), clip.frames - 1);
-    if (wanted !== previous) direction = wanted > previous ? 1 : -1;
-    previous = wanted;
-    hero.style.setProperty('--hero-progress', progress);
-    hero.classList.toggle('is-beyond', progress > .70);
-    showFrame(wanted);
-    if (!wanted) return;
-
-    const connection = navigator.connection;
-    const lightMode = clip.name === 'mobile' || connection?.saveData || /2g|3g/.test(connection?.effectiveType ?? '');
-    if (lightMode) loadPreview();
-    const active = Math.floor(wanted / sheetSize);
-    for (const index of new Set([...sheets.keys(), ...requests.keys()])) {
-      if (Math.abs(index - active) > 1) forget(index);
-    }
-    if (!connection?.saveData || !preview) loadSheet(active, true);
-    if (sheets.has(active) && !navigator.connection?.saveData) {
-      loadSheet(active + direction);
-    }
+    const playhead = clamp(progress / .91);
+    const attack = .57;
+    const impact = clip.impact * rate;
+    target = Math.round(playhead <= attack
+      ? impact * playhead / attack
+      : mix(impact, frameCount - 1, (playhead - attack) / (1 - attack)));
+    scheduleTick();
   }
 
-  function schedule() {
-    if (clip && pending === undefined) pending = requestAnimationFrame(updateScroll);
+  function scheduleScroll() {
+    if (clip && scrollId === undefined) scrollId = requestAnimationFrame(updateScroll);
   }
 
   function showStatic() {
     clip = undefined;
-    clearMedia();
+    clearTracks();
     hero.classList.remove('is-active', 'has-frame', 'is-beyond');
     hero.style.removeProperty('--hero-shade');
     hero.style.removeProperty('--hero-water-mask');
@@ -217,10 +278,14 @@
     }
     const selected = clips[portrait.matches ? 'mobile' : 'desktop'];
     if (selected === clip) return;
-    clearMedia();
+    clearTracks();
     clip = selected;
-    drawn = wanted = previous = 0;
-    drawnPreview = false;
+    current = target = 0;
+    drawn = -1;
+    drawnTrack = motionTrack = lastStep = undefined;
+    lockLight = false;
+    preferredLight = connectionIsLight();
+    seekingEntry = nextAreaVisible = true;
     canvas.width = selected.width;
     canvas.height = selected.height;
     hero.classList.add('is-active');
@@ -228,27 +293,22 @@
     arrow.hidden = false;
     revealTitle(0);
     document.documentElement.classList.remove('hero-preload');
-    schedule();
+    scheduleScroll();
   }
 
-  function warmFirstSheet() {
-    if (!clip || wanted) return;
-    if (clip.name === 'mobile' || navigator.connection?.saveData) loadPreview();
-    else loadSheet(0, true);
+  function prime() {
+    if (!clip || target > 0) return;
+    requestSheet(tracks.light, 0, true);
+    requestSheet(tracks.light, 1, false);
+    if (!preferredLight) requestSheet(tracks.full, 0, true);
   }
 
-  if ('IntersectionObserver' in window) {
-    new IntersectionObserver(([entry]) => {
-      inView = entry.isIntersecting;
-      if (inView) schedule();
-    }).observe(stage);
-  }
-  hero.addEventListener('touchstart', warmFirstSheet, { passive: true, once: true });
-  hero.addEventListener('wheel', warmFirstSheet, { passive: true, once: true });
-  arrow.addEventListener('click', warmFirstSheet);
-  window.addEventListener('scroll', schedule, { passive: true });
-  window.addEventListener('resize', schedule, { passive: true });
-  window.addEventListener('pageshow', schedule);
+  hero.addEventListener('touchstart', prime, { passive: true, once: true });
+  hero.addEventListener('wheel', prime, { passive: true, once: true });
+  arrow.addEventListener('click', prime);
+  window.addEventListener('scroll', scheduleScroll, { passive: true });
+  window.addEventListener('resize', scheduleScroll, { passive: true });
+  window.addEventListener('pageshow', scheduleScroll);
   portrait.addEventListener('change', loadClip);
   motion.addEventListener('change', loadClip);
   loadClip();
