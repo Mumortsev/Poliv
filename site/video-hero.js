@@ -9,13 +9,13 @@
   const motion = matchMedia('(prefers-reduced-motion: reduce)');
 
   const clips = {
-    mobile: { name: 'mobile', width: 288, height: 512, lightWidth: 108, lightHeight: 192,
+    mobile: { name: 'mobile', width: 288, height: 512, lightWidth: 90, lightHeight: 160,
       impact: 6.27, reveal: 6.33, clear: 7.06 },
-    desktop: { name: 'desktop', width: 768, height: 432, lightWidth: 192, lightHeight: 108,
+    desktop: { name: 'desktop', width: 768, height: 432, lightWidth: 160, lightHeight: 90,
       impact: 5.28, reveal: 5.42, clear: 6.75 },
   };
-  const rate = 24;
-  const frameCount = 287;
+  const rate = 60;
+  const frameCount = 718;
   const sheetSize = 12;
   const landingPoints = [
     [12, 16, .01], [43, 7, .05], [71, 14, .14], [95, 9, .12],
@@ -40,6 +40,7 @@
   const lightCache = new Map();
   let seekingEntry = false;
   let preferredLight = false;
+  let sharpenTimer;
 
   function revealTitle(time) {
     const progress = clamp((time - clip.reveal) / (clip.clear - clip.reveal));
@@ -90,6 +91,7 @@
       track.failed.clear();
     }
     lightCache.clear();
+    clearTimeout(sharpenTimer);
   }
 
   function sheetIndex(frame) {
@@ -106,7 +108,7 @@
     track.loading.set(index, controller);
     const file = String(index).padStart(2, '0');
     const cached = track.name === 'light' ? lightCache.get(index) : undefined;
-    const bytes = cached ? Promise.resolve(cached) : fetch(`media/sequence/${reference.name}/${track.name}/${file}.webp`, {
+    const bytes = cached ? Promise.resolve(cached) : fetch(`media/sequence60/${reference.name}/${track.name}/${file}.webp`, {
       signal: controller.signal,
       priority: urgent ? 'high' : 'low',
     }).then(response => {
@@ -153,9 +155,21 @@
       requestSheet(light, index + 2 * direction, false);
     }
     if (!navigator.connection?.saveData) {
-      if (!moving || !preferredLight) requestSheet(full, index, !moving);
+      if (light.failed.has(index) || (moving && !preferredLight)) requestSheet(full, index, light.failed.has(index));
       if (moving && !preferredLight) requestSheet(full, index + direction, false);
     }
+  }
+
+  function sharpenWhenStill(frame) {
+    if (!frame || navigator.connection?.saveData) return;
+    const index = sheetIndex(frame);
+    const full = tracks.full;
+    if (full.images.has(index) || full.loading.has(index) || full.failed.has(index)) return;
+    const reference = clip;
+    clearTimeout(sharpenTimer);
+    sharpenTimer = setTimeout(() => {
+      if (clip === reference && current === frame && target === frame) requestSheet(full, index, true);
+    }, 160);
   }
 
   function drawFrame(frame, track) {
@@ -195,25 +209,55 @@
     return motionTrack === tracks.light ? light ?? full : full ?? light;
   }
 
+  function bufferedFrames(frame, direction) {
+    const start = frame + direction;
+    if (start < 0 || start >= frameCount) return 0;
+    const light = tracks.light.images;
+    const full = tracks.full.images;
+    let buffered = 0;
+    for (let index = sheetIndex(start), count = 0; count < 4; index += direction, count++) {
+      if (!light.has(index) && !full.has(index)) break;
+      buffered += count === 0
+        ? direction > 0 ? sheetSize - start % sheetSize : start % sheetSize + 1
+        : sheetSize;
+    }
+    return buffered;
+  }
+
   function tick(now) {
     tickId = undefined;
     if (!clip || !nextAreaVisible) return;
-    const direction = target < current ? -1 : 1;
-    const moving = target !== current;
+    const difference = target - current;
+    const direction = difference < 0 ? -1 : 1;
+    const moving = difference !== 0;
     if (!moving) { motionTrack = undefined; lockLight = false; }
-    const next = seekingEntry ? target : moving ? current + direction : current;
+
+    const interval = 1000 / rate;
+    if (moving && !seekingEntry && lastStep !== undefined && now - lastStep + .65 < interval) {
+      scheduleTick();
+      return;
+    }
+    // Fast swipes keep the next display refresh smooth while catching up with the pointer.
+    const distance = Math.abs(difference);
+    const available = preferredLight && moving ? bufferedFrames(current, direction) : Infinity;
+    const pace = distance > 165 ? 4 : distance > 72 ? 3 : distance > 24 ? 2 : 1;
+    const step = Math.min(distance, pace, available < 19 ? 1 : available < 32 ? 2 : 4);
+    let next = seekingEntry ? target : current + direction * step;
     if (next > 0) warm(next, direction, moving && !seekingEntry);
-    const track = next === 0 ? undefined : frameTrack(next, moving && !seekingEntry, direction);
+    let track = next === 0 ? undefined : frameTrack(next, moving && !seekingEntry, direction);
+    if (next > 0 && !track && moving && !seekingEntry) {
+      const nearest = current + direction;
+      const neighbor = nearest === 0 ? undefined : frameTrack(nearest, true, direction);
+      if (nearest === 0 || neighbor) {
+        next = nearest;
+        track = neighbor;
+      }
+    }
     if (next > 0 && !track) {
       lastStep = undefined;
       const index = sheetIndex(next);
       if (tracks.light.failed.has(index) &&
           (navigator.connection?.saveData || tracks.full.failed.has(index))) showStatic();
-      return;
-    }
-    const interval = 1000 / Math.min(60, 24 + Math.abs(target - current) * .52);
-    if (moving && !seekingEntry && lastStep !== undefined && now - lastStep + 1.5 < interval) {
-      scheduleTick();
       return;
     }
     const previousStep = lastStep;
@@ -222,7 +266,7 @@
     drawFrame(current, track);
     lastStep = moving ? Math.max(now - interval, (previousStep ?? now - interval) + interval) : undefined;
     if (target !== current) scheduleTick();
-    else if (current > 0) warm(current, direction, false);
+    else sharpenWhenStill(current);
   }
 
   function scheduleTick() {
