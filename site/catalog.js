@@ -18,10 +18,23 @@ function element(tag, content = '', className = '') {
   return node;
 }
 
+const dataRequests = new Map();
 async function dataFile(name) {
-  const response = await fetch('data/' + name + '.json');
-  if (!response.ok) throw new Error('Данные каталога недоступны');
-  return response.json();
+  if (!dataRequests.has(name)) {
+    const request = fetch('data/' + name + '.json').then(response => {
+      if (!response.ok) throw new Error('Данные каталога недоступны');
+      return response.json();
+    }).catch(error => {
+      dataRequests.delete(name);
+      throw error;
+    });
+    dataRequests.set(name, request);
+  }
+  return dataRequests.get(name);
+}
+
+function listOf(type) {
+  return dataFile('list-' + type);
 }
 
 function card(item) {
@@ -31,6 +44,8 @@ function card(item) {
     image.src = item.image;
     image.alt = item.title;
     image.loading = 'lazy';
+    image.decoding = 'async';
+    if (item.imageSize) [image.width, image.height] = item.imageSize;
     image.addEventListener('error', () => image.remove(), { once: true });
     article.append(image);
   }
@@ -59,43 +74,79 @@ async function showDirectory() {
   const category = document.querySelector('#directory-category');
   const more = document.querySelector('#directory-more');
   const buttons = [...document.querySelectorAll('[data-type]')];
-  const { summary, items } = await dataFile('index');
   const requested = params.get('type');
+  const pageSize = 12;
   let type = Object.hasOwn(types, requested) ? requested : 'product';
-  let size = 24;
+  let revision = 0;
+  let visibleCount = 0;
+  let matches = [];
+  let productCategoriesLoaded = false;
+  let selectedCategory = params.get('category') ?? '';
+  const searchText = new WeakMap();
   search.value = params.get('q') ?? '';
-  for (const name of [...new Set(items.filter(item => item.type === 'product').map(categoryName).filter(Boolean))].sort((a,b) => a.localeCompare(b, 'ru'))) {
-    category.add(new Option(name, name));
-  }
-  category.value = params.get('category') ?? '';
-  document.querySelector('#directory-date').textContent =
-    'Обновление открытого каталога: ' + new Intl.DateTimeFormat('ru-RU', { dateStyle: 'long', timeZone: 'UTC' }).format(new Date(summary.imported)) + '.';
 
-  function render() {
+  function queryText(item) {
+    if (!searchText.has(item)) {
+      const text = [item.title, item.sku, item.vendor, item.summary, ...item.breadcrumb, ...(item.tags ?? [])];
+      searchText.set(item, normalize(text.join(' ')));
+    }
+    return searchText.get(item);
+  }
+
+  function appendCards() {
+    const next = matches.slice(visibleCount, visibleCount + pageSize);
+    target.append(...next.map(card));
+    visibleCount += next.length;
+    more.hidden = matches.length <= visibleCount;
+    status.textContent = matches.length ? `Найдено: ${matches.length}. Показано: ${visibleCount}.` : 'По этому запросу ничего не найдено.';
+  }
+
+  async function render() {
+    const current = ++revision;
+    const selectedType = type;
     const query = normalize(search.value).split(/\s+/).filter(Boolean);
-    category.parentElement.hidden = type !== 'product';
-    buttons.forEach(button => button.setAttribute('aria-pressed', button.dataset.type === type));
-    const context = new URLSearchParams({ type });
+    category.parentElement.hidden = selectedType !== 'product';
+    buttons.forEach(button => button.setAttribute('aria-pressed', button.dataset.type === selectedType));
+    const context = new URLSearchParams({ type: selectedType });
     if (search.value.trim()) context.set('q', search.value.trim());
-    if (type === 'product' && category.value) context.set('category', category.value);
+    if (selectedType === 'product' && selectedCategory) context.set('category', selectedCategory);
     history.replaceState(null, '', '?' + context);
-    const matches = items.filter(item => (
-      (type === 'all' || item.type === type) &&
-      (type !== 'product' || !category.value || categoryName(item) === category.value) &&
-      query.every(part => normalize([item.title, item.sku, item.vendor, item.summary, ...item.breadcrumb, ...(item.tags ?? [])].join(' ')).includes(part))
-    ));
-    target.replaceChildren(...matches.slice(0, size).map(card));
-    more.hidden = matches.length <= size;
-    status.textContent = matches.length ? `Найдено: ${matches.length}. Показано: ${Math.min(size, matches.length)}.` : 'По этому запросу ничего не найдено.';
+    more.hidden = true;
+    status.textContent = 'Загружаем каталог…';
+    try {
+      const datasets = selectedType === 'all'
+        ? await Promise.all(['product', 'category', 'article', 'page'].map(listOf))
+        : [await listOf(selectedType)];
+      if (revision !== current) return;
+      const items = datasets.flatMap(group => group.items);
+      if (selectedType === 'product' && !productCategoriesLoaded) {
+        const names = [...new Set(items.map(categoryName).filter(Boolean))].sort((a,b) => a.localeCompare(b,'ru'));
+        for (const name of names) category.add(new Option(name, name));
+        category.value = selectedCategory;
+        productCategoriesLoaded = true;
+      }
+      matches = items.filter(item => (
+        (selectedType !== 'product' || !selectedCategory || categoryName(item) === selectedCategory) &&
+        query.every(part => queryText(item).includes(part))
+      ));
+      document.querySelector('#directory-date').textContent = 'Обновление открытого каталога: ' +
+        new Intl.DateTimeFormat('ru-RU', { dateStyle: 'long', timeZone: 'UTC' }).format(new Date(datasets[0].imported)) + '.';
+      target.replaceChildren();
+      visibleCount = 0;
+      appendCards();
+    } catch (error) {
+      if (revision !== current) return;
+      target.replaceChildren();
+      status.textContent = error.message;
+    }
   }
 
-  function reset() { size = 24; render(); }
-  document.querySelector('#directory-search').addEventListener('submit', event => { event.preventDefault(); reset(); });
-  search.addEventListener('search', reset);
-  category.addEventListener('change', reset);
-  buttons.forEach(button => button.addEventListener('click', () => { type = button.dataset.type; reset(); }));
-  more.addEventListener('click', () => { size += 24; render(); });
-  render();
+  document.querySelector('#directory-search').addEventListener('submit', event => { event.preventDefault(); render(); });
+  search.addEventListener('search', render);
+  category.addEventListener('change', () => { selectedCategory = category.value; render(); });
+  buttons.forEach(button => button.addEventListener('click', () => { type = button.dataset.type; render(); }));
+  more.addEventListener('click', appendCards);
+  await render();
 }
 
 function recordGroup(path) {
@@ -107,10 +158,9 @@ function recordGroup(path) {
 async function showMaterial() {
   const path = params.get('p');
   if (!path?.startsWith('/') || path.startsWith('//')) throw new Error('Выберите страницу в каталоге.');
-  const [{ items }, records] = await Promise.all([dataFile('index'), dataFile(recordGroup(path))]);
+  const records = await dataFile(recordGroup(path));
   const item = records[path];
   if (!item) throw new Error('Эту страницу можно открыть на действующем сайте.');
-  const known = new Map(items.map(entry => [entry.path, entry]));
   const source = originalUrl(path);
   document.title = item.title + ' — Технополив';
   document.querySelector('#material-title').textContent = item.title;
@@ -127,6 +177,7 @@ async function showMaterial() {
       image.src = src;
       image.alt = item.title;
       image.loading = 'lazy';
+      image.decoding = 'async';
       image.addEventListener('error', () => image.remove(), { once: true });
       document.querySelector('#material-images').append(image);
     }
@@ -142,39 +193,15 @@ async function showMaterial() {
       tags.append(link);
     }
   }
-  const migrated = new Set();
-  function resolve(href) {
-    if (!href) return null;
-    try {
-      const url = new URL(href);
-      const target = decodeURIComponent(url.pathname);
-      return url.origin === origin && known.has(target) ? target : null;
-    } catch {
-      return null;
-    }
-  }
-  for (const link of body.querySelectorAll('a[href]')) {
-    const target = resolve(link.href);
-    if (target) {
-      link.href = detailUrl(target);
-      migrated.add(target);
-    }
-  }
-  const linked = new Set((item.links ?? []).map(resolve).filter(target => target && target !== path && !migrated.has(target)));
-  if (item.type === 'category') {
-    for (const product of items.filter(entry => entry.type === 'product' && entry.breadcrumb.includes(item.title))) {
-      linked.add(product.path);
-    }
-  }
-  for (const target of linked) {
+  document.querySelector('#material-status').hidden = true;
+  document.querySelector('#material-article').hidden = false;
+  for (const [target, label] of item.related ?? []) {
     const entry = element('li');
-    const link = element('a', known.get(target).title);
+    const link = element('a', label);
     link.href = detailUrl(target);
     entry.append(link);
     document.querySelector('#material-links').append(entry);
   }
-  document.querySelector('#material-status').hidden = true;
-  document.querySelector('#material-article').hidden = false;
 }
 
 const directory = document.querySelector('#directory');

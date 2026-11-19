@@ -14,16 +14,16 @@
 }
 .hero-preload .video-hero-stage,.video-hero.is-active .video-hero-stage { height: 100svh; }
 .video-hero.is-active .video-hero-stage { position: sticky; top: 0; }
-.video-hero-media,.video-hero-media picture,.video-hero-media img,.video-hero-media video,.video-hero-media::after {
+.video-hero-media,.video-hero-media picture,.video-hero-media img,.video-hero-media canvas,.video-hero-media::after {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
 }
 .video-hero-media { z-index: -1; }
-.video-hero-media img,.video-hero-media video { object-fit: cover; object-position: 76% center; }
-.video-hero-media video { opacity: 0; }
-.video-hero.has-frame video { opacity: 1; }
+.video-hero-media img,.video-hero-media canvas { object-fit: cover; object-position: 76% center; }
+.video-hero-media canvas { display: block; opacity: 0; }
+.video-hero.has-frame canvas { opacity: 1; }
 .video-hero-media::after {
   content: "";
   pointer-events: none;
@@ -60,7 +60,7 @@
 @media (max-width: 900px) and (orientation: portrait) {
   .video-hero.is-active { height: 228svh; }
   .video-hero-layout { padding-block: clamp(64px, 16svh, 148px) 18px; }
-  .video-hero-media img,.video-hero-media video { object-position: 52% center; }
+  .video-hero-media img,.video-hero-media canvas { object-position: 52% center; }
   .video-hero-media::after { background: linear-gradient(180deg,#0d180de8, #0d180d9c 32%, transparent 57%, transparent 84%, #0d180d85); }
   .video-hero-copy { align-self: start; max-width: min(100%, 550px); }
   .video-hero-brand { font-size: 9px; margin-bottom: 11px; }
